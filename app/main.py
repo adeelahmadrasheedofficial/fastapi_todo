@@ -1,12 +1,10 @@
 import time
 from fastapi import FastAPI, Response, status, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Optional
-from random import randrange
 import psycopg2
-from . import models
+from . import models, schemas
 from .database import engine, get_db
 from sqlalchemy.orm import Session
+from typing import List
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -22,15 +20,6 @@ while True:
         print("Unable to establish database connection.")
         print(f"Error Detail: {error}")
         time.sleep(5)
-
-
-# title str, content str
-class Post(BaseModel):
-    title: str
-    content: str
-    is_active: bool = True
-    rating: Optional[int] = None
-
 
 my_posts = [{"id": "1", "title": "post title", "content": "post content"},
             {"id": "2", "title": "post title 2", "content": "post content 2"}]
@@ -56,22 +45,24 @@ async def root():
     return {"data": "Main Page"}
 
 
-@app.get("/posts")
-async def get_all_posts(db: Session = Depends(get_db)):
+@app.get("/posts", response_model=List[schemas.Post])
+async def get_posts(db: Session = Depends(get_db)):
     posts = db.query(models.Post).all()
-    return {"data": posts}
+    return posts
 
 
-@app.get("/posts/{id}")
+@app.get("/posts/{id}", response_model=schemas.Post)
 async def get_post(id, db: Session = Depends(get_db)):
     post = db.query(models.Post).filter(models.Post.id == id).first()
     if not post:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'post with ID {id} not found')
-    return {"data": post}
+    return post
 
 
-@app.post("/create_post", status_code=status.HTTP_201_CREATED)
-async def create_post(post: Post, db: Session = Depends(get_db)):
+# using pydantic/schema model : Post in decorator to sendback custom/controlled
+# response to the user
+@app.post("/create_post", status_code=status.HTTP_201_CREATED, response_model=schemas.Post)
+async def create_post(post: schemas.PostCreate, db: Session = Depends(get_db)):
     # Standard approach
     # new_post = models.Post(title=post.title, content=post.content, rating=post.rating, is_active=post.is_active)
     # pydantic approach
@@ -79,30 +70,27 @@ async def create_post(post: Post, db: Session = Depends(get_db)):
     db.add(new_post)
     db.commit()
     db.refresh(new_post)
-    return {"data": new_post}
+    return new_post
+
+
+@app.put("/posts/{id}", status_code=status.HTTP_202_ACCEPTED, response_model=schemas.Post)
+async def update_post(id, updated_post: schemas.PostCreate, db: Session = Depends(get_db)):
+    post_query = db.query(models.Post).filter(models.Post.id == id)
+    post = post_query.first()
+    if post is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'post with ID {id} not found so not updated')
+    post_query.update(updated_post.dict(), synchronize_session=False)
+    db.commit()
+
+    return post_query.first()
 
 
 @app.delete("/posts/{id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_post(id: int):
-    cur.execute("""SELECT * FROM post WHERE id = %s""", (str(id),))
-    post = cur.fetchone()
-    if post is None:
+async def delete_post(id: int, db: Session = Depends(get_db)):
+    post = db.query(models.Post).filter(models.Post.id == id)
+    if post.first() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'post with ID {id} not found so not deleted')
-    cur.execute("""DELETE FROM post WHERE id = %s""", (str(id),))
-    conn.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-
-@app.put("/posts/{id}", status_code=status.HTTP_202_ACCEPTED)
-async def update_post(id, post: Post, db: Session = Depends(get_db)):
-    # update_post = models.Post(**post.dict())
-    post_update = db.query(models.Post).filter(models.Post.id == id).first()
-    if post is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'post with ID {id} not found so not updated')
-    post_update.title = post.title
-    post_update.content = post.content
-    post_update.rating = post.rating
-    post_update.is_active = post.is_active
+    # Session Basic in sqlalchemy 1.4 (selecting a sync strategy)
+    post.delete(synchronize_session=False)
     db.commit()
-    db.refresh(update_post)
-    return {"data": update_post}
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
