@@ -1,5 +1,5 @@
 from typing import List
-from .. import models, schemas
+from .. import models, schemas, oauth2
 from ..database import get_db
 from sqlalchemy.orm import Session
 from fastapi import Response, status, HTTPException, Depends, APIRouter
@@ -27,7 +27,8 @@ async def get_post(id, db: Session = Depends(get_db)):
 # using pydantic/schema model : Post in decorator to sendback custom/controlled
 # response to the user
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=schemas.Post)
-async def create_post(post: schemas.PostCreate, db: Session = Depends(get_db)):
+async def create_post(post: schemas.PostCreate, db: Session = Depends(get_db),
+                      get_current_user: int = Depends(oauth2.get_current_user)):
     # Standard approach
     # new_post = models.Post(title=post.title, content=post.content, rating=post.rating, is_active=post.is_active)
     # pydantic approach

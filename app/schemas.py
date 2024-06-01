@@ -42,3 +42,17 @@ class User(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+
+class Token(BaseModel):
+    access_token: str
+    tokey_type: str
+
+
+class TokenData(BaseModel):
+    id: Optional[str] = None
